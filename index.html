@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Candlestick Chart</title>
+    <link rel="stylesheet" href="style.css" />
+</head>
+
+    <body>
+        <div class="toolbar">
+            <div class="toolbar">
+                <button class="tool-btn active" id="candleBtn" data-tool="candle" title="Candle Tool">📊</button>
+                <button class="tool-btn" id="gridBtn" title="Toggle Grid">🧮</button>
+                <button class="tool-btn" id="coordToggleBtn">🧭</button>
+            </div>
+        </div>
+        
+
+        <div class="container">
+            <canvas id="chartCanvas" width="900" height="500"></canvas>
+            <div class="button-wrapper">
+                <button onclick="clearCandles()">Clear All Candles</button>
+            </div>
+        </div>
+
+        <script src="main_test.js"></script>
+    </body>
+</html>
