@@ -3,6 +3,7 @@ const ctx = canvas.getContext("2d");
 
 const gridBtn = document.getElementById("gridBtn");
 const coordToggleBtn = document.getElementById("coordToggleBtn");
+const undoBtn = document.getElementById("undoBtn");
 const candles = [];
 
 const gridSize = 10;
@@ -18,6 +19,8 @@ let draggedCandleIndex = null;
 let dragStart = null;
 let needsRedraw = false;
 let showLogicalCoords = false;
+let hoveredCandleIndex = null;
+let lastHoveredIndex = null;
 
 function snapToGrid(x, size) {
   return Math.round(x / size) * size;
@@ -44,6 +47,21 @@ coordToggleBtn.addEventListener("click", () => {
     scheduleRedraw();
 });
 
+canvas.addEventListener("mouseleave", () => {
+    hoveredCandleIndex = null;
+    canvas.style.cursor = "default";
+    scheduleRedraw();
+});
+
+undoBtn.addEventListener("click", () => {
+    if (lastHoveredIndex !== null) {
+        candles.splice(lastHoveredIndex, 1);
+        lastHoveredIndex = null;
+        hoveredCandleIndex = null;
+        scheduleRedraw();
+    }
+});
+
 function pixelToTime(x) {
     const intervalWidth = canvas.width / 48;
     const index = Math.round(x / intervalWidth);
@@ -57,16 +75,15 @@ function pixelToPrice(y) {
     return `$${price}`;
 }
 
-// DRAW LABLES
 function drawLogicalAxisLabels() {
     ctx.fillStyle = "#333";
     ctx.font = "10px Arial";
     ctx.textAlign = "center";
     ctx.textBaseline = "top";
 
-    // --- Time Labels (X-axis) every 30 min ---
+    // --- Time Labels 1 hr for now---
     const minutesPerDiv = 60;
-    const totalDivs = 24 * 60 / minutesPerDiv; // 48 divisions
+    const totalDivs = 24 * 60 / minutesPerDiv;
     const xInterval = canvas.width / totalDivs;
 
     for (let i = 0; i <= totalDivs; i++) {
@@ -78,9 +95,9 @@ function drawLogicalAxisLabels() {
         ctx.fillText(label, x, canvas.height - 18);
     }
 
-    // --- Price Labels (Y-axis) every $100 ---
+    // Price labels 100 for now may change later
     const priceStep = 100;
-    const maxPrice = 1000; // your logical max
+    const maxPrice = 1000;
     const totalSteps = maxPrice / priceStep;
 
     for (let i = 0; i <= totalSteps; i++) {
@@ -92,7 +109,7 @@ function drawLogicalAxisLabels() {
 }
 
 
-// ---- DRAWING ----
+// ---- DRAW GRID ----
 function drawGrid() {
     if (!showGrid) return;
 
@@ -141,10 +158,16 @@ function redrawAll() {
 
     if (showGrid) drawGrid();
 
-    for (const candle of candles) {
+    for (let i = 0; i < candles.length; i++) {
+        const candle = candles[i];
         if (candle.x < 0 || candle.x > canvas.width) continue;
         drawCandle(candle.x, candle.open, candle.close, candle.high, candle.low);
+
+        if (i === hoveredCandleIndex) {
+            highlightCandle(candle);
+        }
     }
+
 
     if (previewCandle && previewCandle.x >= 0 && previewCandle.x <= canvas.width) {
         drawCandle(
@@ -176,6 +199,21 @@ function clearCandles() {
     scheduleRedraw();
     }
 
+function easeSnap(current, target, ease = 0.5) {
+    return current + (target - current) * ease;
+}
+
+function highlightCandle(candle) {
+    const width = 12;
+    const bodyTop = Math.min(candle.open, candle.close);
+    const bodyHeight = Math.abs(candle.open - candle.close);
+
+    ctx.strokeStyle = "rgba(8, 8, 3, 0.8)";
+    ctx.lineWidth = 2;
+    ctx.strokeRect(candle.x - width / 2, bodyTop - 2, width, bodyHeight + 4);
+}
+
+
 function getCandleAt(x, y) {
     const tolerance = 5;
     const width = 10;
@@ -195,7 +233,7 @@ function getCandleAt(x, y) {
     return null;
 }
 
-// ---- MOUSE EVENTS ----
+// ---- MOUSE EVENTS - Up, Down, Move, Leave ----
 canvas.addEventListener("mousedown", (e) => {
     const rect = canvas.getBoundingClientRect();
     const x = e.clientX - rect.left;
@@ -224,6 +262,15 @@ canvas.addEventListener("mousemove", (e) => {
     const rect = canvas.getBoundingClientRect();
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
+    const hitHover = getCandleAt(x, y);
+
+    if (hitHover) {
+        hoveredCandleIndex = hitHover.index;
+        canvas.style.cursor = "move";
+    } else {
+        hoveredCandleIndex = null;
+        canvas.style.cursor = "default";
+    }
 
     if (currentTool !== "candle") return;
 
@@ -231,9 +278,20 @@ canvas.addEventListener("mousemove", (e) => {
         const candle = candles[draggedCandleIndex];
         const dy = y - dragStart.y;
 
-        candle.x = snapToGrid(x, gridSize);
-        candle.open = snapToGrid(candle.open + dy, gridSize);
-        candle.close = snapToGrid(candle.close + dy, gridSize);
+        dragStart = { x, y };
+
+        // Target snapped positions
+        const targetX = snapToGrid(x, gridSize);
+        const targetOpen = snapToGrid(candle.open + dy, gridSize);
+        const targetClose = snapToGrid(candle.close + dy, gridSize);
+
+        // Smooth easing
+        candle.x = easeSnap(candle.x, targetX);
+        candle.open = easeSnap(candle.open, snapToGrid(candle.open + dy, gridSize));
+        candle.close = easeSnap(candle.close, snapToGrid(candle.close + dy, gridSize));
+
+
+        // Update high/low after easing
         candle.high = Math.min(candle.open, candle.close) - 10;
         candle.low = Math.max(candle.open, candle.close) + 10;
 
@@ -251,6 +309,21 @@ canvas.addEventListener("mousemove", (e) => {
         previewCandle = { x: startX, open, close, high, low };
         scheduleRedraw();
     }
+
+    if (hitHover) {
+        hoveredCandleIndex = hitHover.index;
+        lastHoveredIndex = hitHover.index;
+        canvas.style.cursor = "move";
+    } else {
+        hoveredCandleIndex = null;
+        canvas.style.cursor = "default";
+}
+});
+
+canvas.addEventListener("mouseleave", () => {
+    hoveredCandleIndex = null;
+    canvas.style.cursor = "default";
+    scheduleRedraw();
 });
 
 canvas.addEventListener("mouseup", () => {
