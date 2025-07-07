@@ -68,3 +68,34 @@ button {
     border: 1px solid #888;
     border-radius: 4px;
 }
+
+.canvas-container {
+    position: relative;
+    width: 900px;
+    height: 500px;
+    border: 1px solid #434040;
+}
+
+/* Shared canvas styles */
+.canvas-container canvas {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 900px;
+    height: 500px;
+    background-color: transparent; /* All layers transparent */
+}
+
+/* Background only for base layer */
+#gridCanvas {
+  background-color: #ffffff; /* or #121212 if dark theme */
+    z-index: 1;
+}
+
+#candleCanvas {
+    z-index: 2;
+}
+
+#interactionCanvas {
+    z-index: 3;
+}

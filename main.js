@@ -1,10 +1,19 @@
-const canvas = document.getElementById("chartCanvas");
-const ctx = canvas.getContext("2d");
+// const canvas = document.getElementById("chartCanvas");
+// const ctx = canvas.getContext("2d");
 
 const gridBtn = document.getElementById("gridBtn");
 const coordToggleBtn = document.getElementById("coordToggleBtn");
 const undoBtn = document.getElementById("undoBtn");
 const candles = [];
+
+const gridCanvas = document.getElementById("gridCanvas");
+const candleCanvas = document.getElementById("candleCanvas");
+const interactionCanvas = document.getElementById("interactionCanvas");
+
+// Multi layers
+const gridCtx = gridCanvas.getContext("2d");
+const candleCtx = candleCanvas.getContext("2d");
+const interactionCtx = interactionCanvas.getContext("2d");
 
 const gridSize = 10;
 let showGrid = false;
@@ -20,7 +29,9 @@ let dragStart = null;
 let needsRedraw = false;
 let showLogicalCoords = false;
 let hoveredCandleIndex = null;
-let lastHoveredIndex = null;
+let resizeMode = null;
+let selectedCandleIndex = null;
+
 
 function snapToGrid(x, size) {
   return Math.round(x / size) * size;
@@ -47,23 +58,46 @@ coordToggleBtn.addEventListener("click", () => {
     scheduleRedraw();
 });
 
-canvas.addEventListener("mouseleave", () => {
-    hoveredCandleIndex = null;
-    canvas.style.cursor = "default";
-    scheduleRedraw();
-});
+// interactionCanvas.addEventListener("mouseleave", () => {
+//     hoveredCandleIndex = null;
+//     interactionCanvas.style.cursor = "default";
+//     scheduleRedraw();
+// });
 
 undoBtn.addEventListener("click", () => {
-    if (lastHoveredIndex !== null) {
-        candles.splice(lastHoveredIndex, 1);
-        lastHoveredIndex = null;
+    if (selectedCandleIndex !== null) {
+        candles.splice(selectedCandleIndex, 1);
+        selectedCandleIndex = null;
         hoveredCandleIndex = null;
         scheduleRedraw();
     }
 });
 
+function redrawGrid() {
+    gridCtx.clearRect(0, 0, gridCanvas.width, gridCanvas.height);
+    if (showGrid) drawGrid(gridCtx);
+}
+
+function redrawCandles() {
+    candleCtx.clearRect(0, 0, candleCanvas.width, candleCanvas.height);
+    candles.forEach(c => {
+        drawCandle(candleCtx, c.x, c.open, c.close, c.high, c.low);
+    });
+    if (previewCandle) {
+        drawCandle(candleCtx, previewCandle.x, previewCandle.open, previewCandle.close, previewCandle.high, previewCandle.low);
+    }
+}
+
+function redrawInteraction() {
+    interactionCtx.clearRect(0, 0, interactionCanvas.width, interactionCanvas.height);
+    if (hoveredCandleIndex !== null) {
+        highlightCandle(interactionCtx, candles[hoveredCandleIndex]);
+    }
+}
+
+
 function pixelToTime(x) {
-    const intervalWidth = canvas.width / 48;
+    const intervalWidth = interactionCanvas.width / 48;
     const index = Math.round(x / intervalWidth);
     const hours = Math.floor(index / 2);
     const minutes = index % 2 === 0 ? '00' : '30';
@@ -71,11 +105,11 @@ function pixelToTime(x) {
 }
 
 function pixelToPrice(y) {
-    const price = 500 - Math.round((y / canvas.height) * 500);
+    const price = 500 - Math.round((y / interactionCanvas.height) * 500);
     return `$${price}`;
 }
 
-function drawLogicalAxisLabels() {
+function drawLogicalAxisLabels(ctx) {
     ctx.fillStyle = "#333";
     ctx.font = "10px Arial";
     ctx.textAlign = "center";
@@ -84,7 +118,7 @@ function drawLogicalAxisLabels() {
     // --- Time Labels 1 hr for now---
     const minutesPerDiv = 60;
     const totalDivs = 24 * 60 / minutesPerDiv;
-    const xInterval = canvas.width / totalDivs;
+    const xInterval = interactionCanvas.width / totalDivs;
 
     for (let i = 0; i <= totalDivs; i++) {
         const x = i * xInterval;
@@ -92,7 +126,7 @@ function drawLogicalAxisLabels() {
         const hours = Math.floor(totalMinutes / 60);
         const mins = totalMinutes % 60;
         const label = `${String(hours).padStart(2, '0')}:${String(mins).padStart(2, '0')}`;
-        ctx.fillText(label, x, canvas.height - 18);
+        ctx.fillText(label, x, interactionCanvas.height - 18);
     }
 
     // Price labels 100 for now may change later
@@ -102,7 +136,7 @@ function drawLogicalAxisLabels() {
 
     for (let i = 0; i <= totalSteps; i++) {
         const price = i * priceStep;
-        const y = canvas.height - (price / maxPrice) * canvas.height;
+        const y = interactionCanvas.height - (price / maxPrice) * gridCanvas.height;
         ctx.textAlign = "left";
         ctx.fillText(`$${price}`, 4, y + 3);
     }
@@ -110,35 +144,34 @@ function drawLogicalAxisLabels() {
 
 
 // ---- DRAW GRID ----
-function drawGrid() {
+function drawGrid(ctx) {
     if (!showGrid) return;
 
     ctx.strokeStyle = "#eee";
     ctx.lineWidth = 0.5;
 
     // Vertical lines (Time)
-    for (let x = 0; x < canvas.width; x += canvas.width / 48) {
+    for (let x = 0; x < gridCanvas.width; x += gridCanvas.width / 48) {
         ctx.beginPath();
         ctx.moveTo(x, 0);
-        ctx.lineTo(x, canvas.height);
+        ctx.lineTo(x, gridCanvas.height);
         ctx.stroke();
     }
 
     // Horizontal lines (Price)
-    for (let y = 0; y < canvas.height; y += canvas.height / 20) {
+    for (let y = 0; y < gridCanvas.height; y += gridCanvas.height / 20) {
         ctx.beginPath();
         ctx.moveTo(0, y);
-        ctx.lineTo(canvas.width, y);
+        ctx.lineTo(gridCanvas.width, y);
         ctx.stroke();
     }
 
     if (showLogicalCoords) {
-        drawLogicalAxisLabels();
+        drawLogicalAxisLabels(gridCtx);
     }
 }
 
-
-function drawCandle(x, open, close, high, low) {
+function drawCandle(ctx, x, open, close, high, low) {
     const width = 10;
     const bodyTop = Math.min(open, close);
     const bodyHeight = Math.abs(open - close);
@@ -153,43 +186,14 @@ function drawCandle(x, open, close, high, low) {
     ctx.fillRect(x - width / 2, bodyTop, width, bodyHeight);
 }
 
-function redrawAll() {
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-    if (showGrid) drawGrid();
-
-    for (let i = 0; i < candles.length; i++) {
-        const candle = candles[i];
-        if (candle.x < 0 || candle.x > canvas.width) continue;
-        drawCandle(candle.x, candle.open, candle.close, candle.high, candle.low);
-
-        if (i === hoveredCandleIndex) {
-            highlightCandle(candle);
-        }
-    }
-
-
-    if (previewCandle && previewCandle.x >= 0 && previewCandle.x <= canvas.width) {
-        drawCandle(
-        previewCandle.x,
-        previewCandle.open,
-        previewCandle.close,
-        previewCandle.high,
-        previewCandle.low
-        );
-    }
-
-    if (showLogicalCoords) {
-        drawLogicalAxisLabels();
-    }
-}
-
 function scheduleRedraw() {
     if (!needsRedraw) {
         needsRedraw = true;
         requestAnimationFrame(() => {
-        redrawAll();
-        needsRedraw = false;
+            redrawGrid();
+            redrawCandles();
+            redrawInteraction();
+            needsRedraw = false;
         });
     }
 }
@@ -203,7 +207,7 @@ function easeSnap(current, target, ease = 0.5) {
     return current + (target - current) * ease;
 }
 
-function highlightCandle(candle) {
+function highlightCandle(ctx, candle) {
     const width = 12;
     const bodyTop = Math.min(candle.open, candle.close);
     const bodyHeight = Math.abs(candle.open - candle.close);
@@ -233,19 +237,56 @@ function getCandleAt(x, y) {
     return null;
 }
 
+function getCandlePartAt(x, y) {
+    const tolerance = 5;
+    const width = 10;
+
+    for (let i = candles.length - 1; i >= 0; i--) {
+        const c = candles[i];
+        const top = Math.min(c.open, c.close);
+        const bottom = Math.max(c.open, c.close);
+        const left = c.x - width / 2;
+        const right = c.x + width / 2;
+
+        if (x >= left - tolerance && x <= right + tolerance) {
+            if (Math.abs(y - c.high) <= tolerance) return { index: i, part: "high" };
+            if (Math.abs(y - c.low) <= tolerance) return { index: i, part: "low" };
+            if (Math.abs(y - c.open) <= tolerance) return { index: i, part: "open" };
+            if (Math.abs(y - c.close) <= tolerance) return { index: i, part: "close" };
+            if (y >= top - tolerance && y <= bottom + tolerance) return { index: i, part: "body" };  // <- Add this
+        }
+    }
+
+    return null;
+}
+
+
 // ---- MOUSE EVENTS - Up, Down, Move, Leave ----
-canvas.addEventListener("mousedown", (e) => {
-    const rect = canvas.getBoundingClientRect();
+interactionCanvas.addEventListener("mousedown", (e) => {
+    const rect = interactionCanvas.getBoundingClientRect();
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
-    const hit = getCandleAt(x, y);
+    const generalHit = getCandleAt(x, y);
+    const partHit = getCandlePartAt(x, y);
 
     if (currentTool !== "candle") return;
 
-    if (hit) {
+    if (partHit) {
         dragging = true;
-        draggedCandleIndex = hit.index;
+        draggedCandleIndex = partHit.index;
+        resizeMode = partHit.part;
         dragStart = { x, y };
+        hoveredCandleIndex = partHit.index;
+
+        selectedCandleIndex = partHit.index;
+    } else if (generalHit) {
+        dragging = true;
+        draggedCandleIndex = generalHit.index;
+        resizeMode = "body";
+        dragStart = { x, y };
+        hoveredCandleIndex = generalHit.index;
+
+        selectedCandleIndex = generalHit.index;
     } else {
         startX = snapToGrid(x, gridSize);
         startY = y;
@@ -258,46 +299,36 @@ canvas.addEventListener("mousedown", (e) => {
 }
 });
 
-canvas.addEventListener("mousemove", (e) => {
-    const rect = canvas.getBoundingClientRect();
+interactionCanvas.addEventListener("mousemove", (e) => {
+    const rect = interactionCanvas.getBoundingClientRect();
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
-    const hitHover = getCandleAt(x, y);
-
-    if (hitHover) {
-        hoveredCandleIndex = hitHover.index;
-        canvas.style.cursor = "move";
-    } else {
-        hoveredCandleIndex = null;
-        canvas.style.cursor = "default";
-    }
+    const hitHover = getCandlePartAt(x, y);
 
     if (currentTool !== "candle") return;
 
-    if (dragging && draggedCandleIndex !== null) {
-        const candle = candles[draggedCandleIndex];
-        const dy = y - dragStart.y;
+    if (dragging && draggedCandleIndex !== null && resizeMode) {
+    const candle = candles[draggedCandleIndex];
+    const dx = x - dragStart.x;
+    const dy = y - dragStart.y;
 
-        dragStart = { x, y };
-
-        // Target snapped positions
-        const targetX = snapToGrid(x, gridSize);
-        const targetOpen = snapToGrid(candle.open + dy, gridSize);
-        const targetClose = snapToGrid(candle.close + dy, gridSize);
-
-        // Smooth easing
-        candle.x = easeSnap(candle.x, targetX);
-        candle.open = easeSnap(candle.open, snapToGrid(candle.open + dy, gridSize));
-        candle.close = easeSnap(candle.close, snapToGrid(candle.close + dy, gridSize));
-
-
-        // Update high/low after easing
-        candle.high = Math.min(candle.open, candle.close) - 10;
-        candle.low = Math.max(candle.open, candle.close) + 10;
-
-        dragStart = { x, y };
-        scheduleRedraw();
+    switch (resizeMode) {
+        case "high": candle.high += dy; break;
+        case "low": candle.low += dy; break;
+        case "open": candle.open += dy; break;
+        case "close": candle.close += dy; break;
+        case "body":
+            candle.x += dx;
+            candle.open += dy;
+            candle.close += dy;
+            candle.high += dy;
+            candle.low += dy;
+            break;
     }
+
+    dragStart = { x, y };
+    scheduleRedraw();
+}
 
     if (isDrawing) {
         const currentY = snapToGrid(y, gridSize);
@@ -312,21 +343,20 @@ canvas.addEventListener("mousemove", (e) => {
 
     if (hitHover) {
         hoveredCandleIndex = hitHover.index;
-        lastHoveredIndex = hitHover.index;
-        canvas.style.cursor = "move";
+        interactionCanvas.style.cursor = "move";
     } else {
         hoveredCandleIndex = null;
-        canvas.style.cursor = "default";
+        interactionCanvas.style.cursor = "default";
 }
 });
 
-canvas.addEventListener("mouseleave", () => {
+interactionCanvas.addEventListener("mouseleave", () => {
     hoveredCandleIndex = null;
-    canvas.style.cursor = "default";
+    interactionCanvas.style.cursor = "default";
     scheduleRedraw();
 });
 
-canvas.addEventListener("mouseup", () => {
+interactionCanvas.addEventListener("mouseup", () => {
     if (currentTool !== "candle") return;
 
     if (isDrawing && previewCandle) {
@@ -338,6 +368,7 @@ canvas.addEventListener("mouseup", () => {
     dragging = false;
     draggedCandleIndex = null;
     dragStart = null;
+    resizeMode = null;
 
     scheduleRedraw();
 });
